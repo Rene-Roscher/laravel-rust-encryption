@@ -1,0 +1,26 @@
+name: Security Audit
+
+on:
+  push:
+    branches: [main, master]
+    paths: ['Cargo.toml']
+  pull_request:
+    paths: ['Cargo.toml']
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@cargo-audit
+      # The lockfile is not committed (library), so audit what a fresh resolve picks.
+      - run: cargo generate-lockfile
+      - run: cargo audit

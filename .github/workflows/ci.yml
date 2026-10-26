@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore: ['**.md', 'LICENSE']
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Resolve dependency versions that support the MSRV declared in Cargo.toml (there is no
+  # committed lockfile), so the 1.85 job tests what a 1.85 user gets.
+  CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+
+jobs:
+  test:
+    name: Test (Rust ${{ matrix.rust }} / ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        # 1.85 is the minimum supported Rust version (rust-version in Cargo.toml).
+        rust: ['1.85', stable]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --all-targets
+      - run: cargo test --doc
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - run: cargo llvm-cov --lcov --output-path lcov.info
+      - uses: codecov/codecov-action@v5
+        with:
+          files: lcov.info
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+  interop:
+    name: Interop (Laravel ${{ matrix.laravel }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        laravel: ['10', '11', '12', '13']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: openssl, mbstring
+          tools: composer
+      - name: Install real illuminate/encryption ^${{ matrix.laravel }}
+        run: composer require "illuminate/encryption:^${{ matrix.laravel }}.0" --no-interaction --no-progress
+
+      # Laravel -> Rust: PHP generates fresh vectors, Rust decrypts them.
+      - name: Generate Laravel vectors
+        run: php scripts/generate_vectors.php
+      - name: Rust decrypts Laravel vectors
+        run: cargo test --test laravel_vectors
+
+      # Rust -> Laravel: Rust encrypts, PHP decrypts and asserts.
+      - name: Laravel decrypts Rust vectors
+        run: cargo run --example genvectors | php scripts/verify_rust_vectors.php

@@ -1,0 +1,15 @@
+# examples/ is a dev-only interop helper (exercised by the CI interop job via `cargo run`),
+# not shipped library code, so it's excluded from the coverage metric.
+ignore:
+  - "examples/**"
+
+coverage:
+  status:
+    project:
+      default:
+        target: 90%
+        threshold: 1%
+    patch:
+      default:
+        target: 85%
+        threshold: 1%

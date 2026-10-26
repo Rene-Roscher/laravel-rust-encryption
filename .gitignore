@@ -1,0 +1,14 @@
+# Build output
+/target/
+
+# Library: lockfile is not committed
+Cargo.lock
+
+# PHP interop harness deps (CI installs them)
+/vendor/
+composer.lock
+
+# Editor/OS
+.idea/
+.vscode/
+.DS_Store
