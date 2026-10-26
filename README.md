@@ -202,6 +202,7 @@ cargo test                                   # unit tests, Laravel-generated vec
 composer install                             # once, for the interop harness (needs PHP 8.2+)
 php scripts/generate_vectors.php             # regenerate fixtures/vectors.json with real Laravel
 cargo run --example genvectors | php scripts/verify_rust_vectors.php
+cargo run --example mutations | php scripts/verify_mutations.php
 ```
 
 `fixtures/vectors.json` holds payloads produced by the real `illuminate/encryption` (all four
@@ -209,9 +210,14 @@ ciphers, strings, serialized values, previous keys). `tests/laravel_vectors.rs` 
 checks that re-serializing each decoded value reproduces PHP's `serialize()` output byte for
 byte.
 
+`examples/mutations.rs` emits valid and mutated payloads (edited fields, odd JSON types, broken
+base64) with Rust's verdict on each; `scripts/verify_mutations.php` asks the real Laravel
+encrypter about the same payloads, and both must accept and reject exactly the same ones and
+return the same plaintext.
+
 CI additionally runs, for Laravel 10, 11, 12 and 13, a fresh generation of those vectors
-(**Laravel to Rust**) and `scripts/verify_rust_vectors.php`, which decrypts what Rust encrypted
-with the real Laravel encrypter (**Rust to Laravel**).
+(**Laravel to Rust**), `scripts/verify_rust_vectors.php`, which decrypts what Rust encrypted
+with the real Laravel encrypter (**Rust to Laravel**), and the mutation comparison.
 
 ## License
 

@@ -96,3 +96,7 @@ jobs:
       # Rust -> Laravel: Rust encrypts, PHP decrypts and asserts.
       - name: Laravel decrypts Rust vectors
         run: cargo run --example genvectors | php scripts/verify_rust_vectors.php
+
+      # Malformed input: Rust and Laravel must accept and reject exactly the same payloads.
+      - name: Rust and Laravel judge mutated payloads alike
+        run: cargo run --example mutations | php scripts/verify_mutations.php
