@@ -1,7 +1,8 @@
 //! Emits valid and mutated payloads together with this crate's verdict on each, as JSON on
 //! stdout. CI pipes this into `scripts/verify_mutations.php`, which asks the real Laravel
 //! encrypter about the same payloads: both must accept and reject exactly the same ones, and
-//! return the same plaintext for the accepted ones.
+//! return the same plaintext for the accepted ones. Laravel versions that have
+//! `Encrypter::appearsEncrypted()` are also asked whether each payload looks encrypted.
 
 use std::io::Write as _;
 
@@ -97,7 +98,8 @@ fn main() {
 
             for payload in payloads {
                 let plain = enc.decrypt_string(&payload).ok();
-                cases.push(json!({ "cipher": cipher.name(), "payload": payload, "plain": plain }));
+                let appears = Encrypter::appears_encrypted(&payload);
+                cases.push(json!({ "cipher": cipher.name(), "payload": payload, "plain": plain, "appears": appears }));
             }
         }
     }
