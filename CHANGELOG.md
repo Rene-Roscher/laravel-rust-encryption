@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `Encrypter::encrypt_cookie` / `decrypt_cookie` for Laravel's `EncryptCookies` middleware,
+  including the name-bound value prefix and previous keys.
+- `Value::from_php_serialized` / `to_php_serialized`, for reading and writing the serialized
+  attributes of encrypted sessions.
+- Tests against the real `EncryptCookies` logic, `EncryptedStore` and Eloquent encrypted casts
+  for Laravel 10 to 13, with random keys.
+
+### Changed
+- `parse_key` decodes the `base64:` form with PHP's lenient `base64_decode`, like Laravel's
+  `EncryptionServiceProvider`: padding is optional and stray characters are skipped. Only an
+  empty key is `Error::InvalidKey`; a malformed value now fails as `Error::InvalidKeyLength`.
+
 ## [0.1.0] - 2026-10-26
 
 ### Added

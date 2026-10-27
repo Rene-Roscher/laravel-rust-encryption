@@ -18,6 +18,8 @@ payloads Laravel can decrypt, using the same key. It is the Rust sibling of
   structures).
 - Accepts the Laravel `APP_KEY` `base64:...` form, a bare base64 key, or raw key bytes.
 - Key rotation: previous keys are tried on decryption, like `APP_PREVIOUS_KEYS` in Laravel 11+.
+- Laravel's cookies (`EncryptCookies`), encrypted sessions and Eloquent `encrypted` casts, checked
+  against the real Laravel classes.
 - Constant-time MAC verification (CBC) and AEAD tag verification (GCM). Tampered, wrong-key and
   malformed payloads are always rejected with typed errors.
 - Payload validation mirrors `Illuminate\Encryption\Encrypter`, including PHP's lenient
@@ -141,6 +143,41 @@ let enc = Encrypter::from_app_key(&app_key, Cipher::Aes256Cbc)?
     .with_previous_keys(old_app_keys.split(',').map(parse_key).collect::<Result<Vec<_>, _>>()?)?;
 ```
 
+### Cookies, sessions and Eloquent casts
+
+These Laravel features all sit on top of the encrypter. Each is verified against the real Laravel
+classes in both directions.
+
+**Cookies.** Laravel's `EncryptCookies` middleware encrypts `prefix + value` without
+serialization, where the prefix binds the cookie to its name and the key. `encrypt_cookie` and
+`decrypt_cookie` do the same; a cookie issued for another name, or by another application, is
+`Error::InvalidCookie`. The prefix is also accepted for any previous key. Pass the raw cookie value,
+URL-decoded if it comes from a `Cookie` header.
+
+```rust
+let cookie = enc.encrypt_cookie("laravel_session", &session_id)?;
+let session_id = enc.decrypt_cookie("laravel_session", &cookie_from_laravel)?;
+```
+
+**Sessions.** With `session.encrypt` Laravel stores `Crypt::encrypt()` of the already serialized
+attributes, so the payload decrypts to a string that holds the serialization (PHP's, or JSON with
+`session.serialization = json`):
+
+```rust
+use laravel_rust_encryption::Value;
+
+let Value::String(serialized) = enc.decrypt(&session_payload)? else { return };
+let attributes = Value::from_php_serialized(&serialized)?;
+let user_id = attributes.get("user_id").and_then(Value::as_i64);
+
+// ...and the way back:
+let payload = enc.encrypt(&Value::Bytes(attributes.to_php_serialized()?))?;
+```
+
+**Eloquent casts.** `encrypted` is `Crypt::encryptString()` of the value; `encrypted:array`,
+`:object` and `:collection` encrypt its JSON. Use `decrypt_string` / `encrypt_string` and your JSON
+library.
+
 ### Errors
 
 Decryption errors mirror Laravel's `DecryptException` and use its messages, so a tampered
@@ -201,12 +238,14 @@ represent the same `f64`.
 cargo test                                   # unit tests, Laravel-generated vectors, tamper tests
 composer install                             # once, for the interop harness (needs PHP 8.2+)
 php scripts/generate_vectors.php             # regenerate fixtures/vectors.json with real Laravel
+php scripts/generate_app_vectors.php         # cookies, sessions, casts, random keys
 cargo run --example genvectors | php scripts/verify_rust_vectors.php
 cargo run --example mutations | php scripts/verify_mutations.php
 ```
 
 `fixtures/vectors.json` holds payloads produced by the real `illuminate/encryption` (all four
-ciphers, strings, serialized values, previous keys). `tests/laravel_vectors.rs` decrypts them and
+ciphers, strings, serialized values, previous keys); `fixtures/app-vectors.json` holds random-key
+payloads and what the real `EncryptCookies` logic, `EncryptedStore` and Eloquent casts produce. `tests/laravel_vectors.rs` decrypts them and
 checks that re-serializing each decoded value reproduces PHP's `serialize()` output byte for
 byte.
 
