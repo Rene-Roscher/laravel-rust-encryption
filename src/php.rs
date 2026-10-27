@@ -78,6 +78,18 @@ impl Value {
         )
     }
 
+    /// Parses PHP `serialize()` output, for example the inner string of an encrypted Laravel
+    /// session. The input must hold exactly one value, nested at most 128 levels deep.
+    pub fn from_php_serialized(data: impl AsRef<[u8]>) -> Result<Self> {
+        unserialize(data.as_ref())
+    }
+
+    /// Writes the value as PHP `serialize()` output. [`Value::Object`] cannot be written
+    /// ([`Error::Serialize`]).
+    pub fn to_php_serialized(&self) -> Result<Vec<u8>> {
+        serialize(self)
+    }
+
     /// Returns `true` for [`Value::Null`].
     pub fn is_null(&self) -> bool {
         matches!(self, Value::Null)

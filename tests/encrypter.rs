@@ -483,7 +483,24 @@ fn parses_app_key_forms() {
 
     assert_eq!(parse_key(""), Err(Error::InvalidKey));
     assert_eq!(parse_key("base64:"), Ok(Vec::new()));
-    assert_eq!(parse_key("base64:!!!not base64!!!"), Err(Error::InvalidKey));
+
+    // Laravel decodes the base64: form with PHP's lenient base64_decode: padding is optional and
+    // characters outside the alphabet are skipped.
+    let unpadded = STANDARD.encode([0xfbu8; 32]);
+    assert!(unpadded.ends_with('='));
+    assert_eq!(
+        parse_key(&format!("base64:{}", unpadded.trim_end_matches('='))).unwrap(),
+        [0xfbu8; 32]
+    );
+    assert_eq!(
+        parse_key(&format!("base64:{}\n", unpadded)).unwrap(),
+        [0xfbu8; 32]
+    );
+    // PHP: bin2hex(base64_decode("!!!not base64!!!")) === "9e8b5b6ac7ba"
+    assert_eq!(
+        parse_key("base64:!!!not base64!!!").unwrap(),
+        [0x9e, 0x8b, 0x5b, 0x6a, 0xc7, 0xba]
+    );
 }
 
 #[test]
@@ -506,9 +523,13 @@ fn from_app_key_matches_new() {
         Encrypter::from_app_key("", Cipher::Aes256Cbc).unwrap_err(),
         Error::InvalidKey
     );
+    // A malformed value decodes to the wrong length, as in Laravel.
     assert_eq!(
         Encrypter::from_app_key("base64:@@@@", Cipher::Aes256Cbc).unwrap_err(),
-        Error::InvalidKey
+        Error::InvalidKeyLength {
+            expected: 32,
+            actual: 0
+        }
     );
 }
 
@@ -684,6 +705,7 @@ fn decryption_errors_use_laravels_messages() {
         },
         Error::Unserialize,
         Error::Serialize,
+        Error::InvalidCookie,
         Error::InvalidUtf8,
     ];
     for e in all {

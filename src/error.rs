@@ -15,7 +15,7 @@ pub enum Error {
     /// The cipher name is not one of `aes-128-cbc`, `aes-256-cbc`, `aes-128-gcm` or
     /// `aes-256-gcm`.
     UnsupportedCipher,
-    /// The key is empty or is a malformed `base64:` value.
+    /// The key is empty.
     InvalidKey,
     /// The key does not have the length the cipher requires.
     InvalidKeyLength {
@@ -39,6 +39,9 @@ pub enum Error {
     Unserialize,
     /// The value cannot be PHP-serialized (see [`Value::Object`](crate::Value::Object)).
     Serialize,
+    /// A decrypted cookie does not start with the prefix Laravel adds for its name and key, so
+    /// it was not issued for this cookie (or by this application).
+    InvalidCookie,
     /// The decrypted plaintext is not valid UTF-8; use
     /// [`Encrypter::decrypt_bytes`](crate::Encrypter::decrypt_bytes).
     InvalidUtf8,
@@ -51,7 +54,7 @@ impl fmt::Display for Error {
                 "Unsupported cipher. Supported ciphers are: aes-128-cbc, aes-256-cbc, \
                  aes-128-gcm, aes-256-gcm.",
             ),
-            Error::InvalidKey => f.write_str("The encryption key is empty or malformed."),
+            Error::InvalidKey => f.write_str("The encryption key is empty."),
             Error::InvalidKeyLength { expected, actual } => write!(
                 f,
                 "Incorrect key length for the cipher: expected {expected} bytes, got {actual}."
@@ -62,6 +65,7 @@ impl fmt::Display for Error {
             Error::Encrypt => f.write_str("Could not encrypt the data."),
             Error::Unserialize => f.write_str("The decrypted data is not valid PHP serialization."),
             Error::Serialize => f.write_str("The value cannot be PHP-serialized."),
+            Error::InvalidCookie => f.write_str("The cookie value prefix is invalid."),
             Error::InvalidUtf8 => f.write_str("The decrypted data is not valid UTF-8."),
         }
     }

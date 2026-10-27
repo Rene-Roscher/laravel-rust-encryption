@@ -9,6 +9,7 @@ use base64::Engine as _;
 use cbc::cipher::block_padding::Pkcs7;
 use cbc::cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit};
 use hmac::{Hmac, Mac};
+use sha1::Sha1;
 use sha2::Sha256;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
@@ -90,8 +91,9 @@ impl FromStr for Cipher {
 
 /// Resolves a key string, as found in a Laravel `.env` file, to raw key bytes.
 ///
-/// - `base64:XXXX` (the `APP_KEY` form) is base64-decoded; a malformed value is
-///   [`Error::InvalidKey`].
+/// - `base64:XXXX` (the `APP_KEY` form) is base64-decoded the way Laravel does, with PHP's
+///   lenient `base64_decode`. Only an empty key is [`Error::InvalidKey`]; a malformed value
+///   decodes to the wrong length, which [`Encrypter::new`] rejects.
 /// - A bare base64 string that decodes to 16 or 32 bytes is decoded.
 /// - Anything else is used as its raw bytes.
 ///
@@ -102,7 +104,9 @@ pub fn parse_key(key: &str) -> Result<Vec<u8>> {
         return Err(Error::InvalidKey);
     }
     if let Some(encoded) = key.strip_prefix("base64:") {
-        return STANDARD.decode(encoded).map_err(|_| Error::InvalidKey);
+        // Laravel uses PHP's lenient base64_decode here. A malformed value therefore yields
+        // bytes of the wrong length, which the encrypter rejects.
+        return Ok(php_base64_decode(encoded, false).unwrap_or_default());
     }
     match STANDARD.decode(key) {
         Ok(decoded) if matches!(decoded.len(), 16 | 32) => Ok(decoded),
@@ -249,7 +253,7 @@ impl Encrypter {
         let p = self.parse_payload(payload)?;
 
         // Like Laravel, try the current key first and then the previous keys.
-        let keys = std::iter::once(&self.key).chain(&self.previous_keys);
+        let keys = self.all_keys();
 
         if self.cipher.is_aead() {
             let tag = p.tag.as_deref().ok_or(Error::Decrypt)?;
@@ -276,6 +280,42 @@ impl Encrypter {
             })
             .ok_or(Error::InvalidMac)?;
         self.cbc_decrypt(key, &p.iv, &p.value)
+    }
+
+    /// Encrypts a cookie value the way Laravel's `EncryptCookies` middleware does: the value is
+    /// prefixed with an HMAC of the cookie name and the key, and encrypted without
+    /// serialization. Laravel decrypts it back to `value` for the cookie `name`.
+    pub fn encrypt_cookie(&self, name: &str, value: &str) -> Result<String> {
+        let mut plain = cookie_prefix(name, &self.key).into_bytes();
+        plain.extend_from_slice(value.as_bytes());
+        self.encrypt_bytes(&plain)
+    }
+
+    /// Decrypts a cookie that Laravel's `EncryptCookies` middleware encrypted, and checks that
+    /// it was issued for the cookie `name` by this application: the prefix must match the
+    /// current key or one of the previous keys, otherwise the result is
+    /// [`Error::InvalidCookie`] (Laravel treats such a cookie as absent).
+    ///
+    /// The payload is the raw cookie value; URL-decode it first if it comes from a
+    /// `Cookie` header. Cookies that an application serializes on purpose
+    /// (`EncryptCookies::serialized()`) are not supported.
+    pub fn decrypt_cookie(&self, name: &str, payload: &str) -> Result<String> {
+        let plain = self.decrypt_bytes(payload)?;
+        for key in self.all_keys() {
+            let prefix = cookie_prefix(name, key);
+            if plain.len() >= prefix.len()
+                && bool::from(plain[..prefix.len()].ct_eq(prefix.as_bytes()))
+            {
+                return String::from_utf8(plain[prefix.len()..].to_vec())
+                    .map_err(|_| Error::InvalidUtf8);
+            }
+        }
+        Err(Error::InvalidCookie)
+    }
+
+    /// The current key followed by the previous keys, like `getAllKeys()`.
+    fn all_keys(&self) -> impl Iterator<Item = &Zeroizing<Vec<u8>>> {
+        std::iter::once(&self.key).chain(&self.previous_keys)
     }
 
     /// Whether `value` looks like a payload produced by an encrypter, without decrypting it
@@ -438,6 +478,14 @@ fn hash(iv_b64: &str, value_b64: &str, key: &[u8]) -> Vec<u8> {
     mac.update(iv_b64.as_bytes());
     mac.update(value_b64.as_bytes());
     mac.finalize().into_bytes().to_vec()
+}
+
+/// Laravel's `CookieValuePrefix::create()`: `hash_hmac('sha1', $name.'v2', $key).'|'`.
+fn cookie_prefix(name: &str, key: &[u8]) -> String {
+    let mut mac = <Hmac<Sha1> as Mac>::new_from_slice(key).expect("HMAC accepts any key length");
+    mac.update(name.as_bytes());
+    mac.update(b"v2");
+    format!("{}|", hex(&mac.finalize().into_bytes()))
 }
 
 fn hex(bytes: &[u8]) -> String {
