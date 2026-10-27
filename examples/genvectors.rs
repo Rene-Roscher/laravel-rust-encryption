@@ -4,7 +4,8 @@
 //! Laravel -> Rust).
 //!
 //! "string" vectors use `encrypt_bytes` / `decryptString`; "serialized" vectors use
-//! `encrypt` / `decrypt` and build the values named in `scripts/cases.php`.
+//! `encrypt` / `decrypt` and build the values named in `scripts/cases.php`. The app-layer
+//! vectors cover random keys, cookies, Eloquent encrypted casts and encrypted sessions.
 
 use laravel_rust_encryption::{Cipher, Encrypter, Value};
 use serde_json::json;
@@ -132,7 +133,100 @@ fn main() {
         }
     }
 
+    app_layer_vectors(&mut vectors);
+
     println!("{}", json!({ "key_b64": base64(&KEY), "vectors": vectors }));
+}
+
+const ALL_CIPHERS: [Cipher; 4] = [
+    Cipher::Aes128Cbc,
+    Cipher::Aes256Cbc,
+    Cipher::Aes128Gcm,
+    Cipher::Aes256Gcm,
+];
+
+/// Random keys, cookies, Eloquent encrypted casts and encrypted sessions.
+fn app_layer_vectors(vectors: &mut Vec<serde_json::Value>) {
+    for cipher in ALL_CIPHERS {
+        let name = |what: &str| format!("{cipher}/{what}");
+
+        // Random keys: every byte value can appear in a key.
+        for i in 0..6 {
+            let key = Encrypter::generate_key(cipher).expect("random key");
+            let enc = Encrypter::new(&key, cipher).expect("valid key");
+            for (n, text) in ["Hello, World!", "", "Grüße 世界 🚀 café"]
+                .iter()
+                .enumerate()
+            {
+                vectors.push(json!({
+                    "kind": "random_key",
+                    "name": name(&format!("key{i}/{n}")),
+                    "cipher": cipher.name(),
+                    "key_b64": base64(&key),
+                    "plaintext_b64": base64(text.as_bytes()),
+                    "payload": enc.encrypt_string(text).expect("encrypt"),
+                }));
+            }
+        }
+
+        let enc = Encrypter::new(&KEY[..cipher.key_size()], cipher).expect("valid key");
+
+        // Cookies, as EncryptCookies expects them.
+        for (cookie, value) in [
+            (
+                "laravel_session",
+                "0123456789abcdef0123456789abcdef01234567",
+            ),
+            ("XSRF-TOKEN", ""),
+            ("a b", "with|pipe|chars"),
+            ("küche", "Grüße 世界"),
+        ] {
+            vectors.push(json!({
+                "kind": "cookie",
+                "name": name(&format!("cookie/{cookie}")),
+                "cipher": cipher.name(),
+                "cookie_name": cookie,
+                "value_b64": base64(value.as_bytes()),
+                "payload": enc.encrypt_cookie(cookie, value).expect("encrypt"),
+            }));
+        }
+
+        // Eloquent casts: encrypted values are Crypt::encryptString() of the value or its JSON.
+        for (attribute, plain) in [
+            ("plain", "hello wörld"),
+            ("list", r#"{"x":1,"y":[1,2],"z":"ü"}"#),
+            ("object", r#"{"k":"v","n":3}"#),
+            ("collection", r#"[1,"two",3.5]"#),
+        ] {
+            vectors.push(json!({
+                "kind": "cast",
+                "name": name(&format!("cast/{attribute}")),
+                "cipher": cipher.name(),
+                "attribute": attribute,
+                "plaintext_b64": base64(plain.as_bytes()),
+                "payload": enc.encrypt_string(plain).expect("encrypt"),
+            }));
+        }
+
+        // Encrypted sessions: Crypt::encrypt() of the serialized attributes.
+        let attributes = Value::map([
+            ("user_id", Value::from(7)),
+            ("cart", Value::map([("apple", 2), ("pear", 1)])),
+            ("name", Value::from("Grüße")),
+        ]);
+        let php = String::from_utf8(attributes.to_php_serialized().expect("serialize"))
+            .expect("ASCII and UTF-8 only");
+        let json_attributes = r#"{"user_id":7,"cart":{"apple":2,"pear":1},"name":"Grüße"}"#;
+        for (serialization, inner) in [("php", php.as_str()), ("json", json_attributes)] {
+            vectors.push(json!({
+                "kind": "session",
+                "name": name(&format!("session/{serialization}")),
+                "cipher": cipher.name(),
+                "serialization": serialization,
+                "payload": enc.encrypt(&Value::String(inner.to_owned())).expect("encrypt"),
+            }));
+        }
+    }
 }
 
 fn base64(bytes: &[u8]) -> String {
