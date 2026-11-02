@@ -27,9 +27,11 @@
 #![warn(missing_docs)]
 
 mod encrypter;
+pub mod envelope;
 mod error;
 mod php;
 
 pub use encrypter::{parse_key, Cipher, Encrypter};
+pub use envelope::{EnvelopeError, Expiry, OpenOptions, Opened, SealOptions};
 pub use error::{Error, Result};
 pub use php::{Key, Value};
