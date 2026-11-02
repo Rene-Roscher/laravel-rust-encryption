@@ -98,8 +98,10 @@ jobs:
         run: |
           php scripts/generate_vectors.php
           php scripts/generate_app_vectors.php
+          php vendor/rene-roscher/laravel-interop/bin/generate-vectors.php
+          cp vendor/rene-roscher/laravel-interop/fixtures/envelope-vectors.json fixtures/envelope-vectors.json
       - name: Rust decrypts Laravel vectors
-        run: cargo test --test laravel_vectors
+        run: cargo test
 
       # Rust -> Laravel: Rust encrypts, PHP decrypts and asserts.
       - name: Laravel decrypts Rust vectors
@@ -108,3 +110,10 @@ jobs:
       # Malformed input: Rust and Laravel must accept and reject exactly the same payloads.
       - name: Rust and Laravel judge mutated payloads alike
         run: cargo run --example mutations | php scripts/verify_mutations.php
+
+      # Interop Envelope: the Laravel package (rene-roscher/laravel-interop) judges the tokens this
+      # crate issues, and our copy of its vectors must still be the package's.
+      - name: Laravel package judges our envelope tokens
+        run: cargo run -q --example envelope | php vendor/rene-roscher/laravel-interop/bin/verify-tokens.php
+      - name: Envelope vectors are the Laravel package's
+        run: php vendor/rene-roscher/laravel-interop/e2e/check-fixtures.php fixtures/envelope-vectors.json
