@@ -7,6 +7,9 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- `Encrypter::seal_envelope` / `open_envelope` (and `_with` variants): the Interop Envelope, an
+  expiring and scoped payload format shared with `rene-roscher/laravel-interop` and the Go and
+  Node.js packages.
 - `Encrypter::encrypt_cookie` / `decrypt_cookie` for Laravel's `EncryptCookies` middleware,
   including the name-bound value prefix and previous keys.
 - `Value::from_php_serialized` / `to_php_serialized`, for reading and writing the serialized

@@ -20,6 +20,8 @@ payloads Laravel can decrypt, using the same key. It is the Rust sibling of
 - Key rotation: previous keys are tried on decryption, like `APP_PREVIOUS_KEYS` in Laravel 11+.
 - Laravel's cookies (`EncryptCookies`), encrypted sessions and Eloquent `encrypted` casts, checked
   against the real Laravel classes.
+- `seal_envelope` / `open_envelope`: expiring, scoped payloads that Laravel and the Go and Node.js
+  packages read too (Interop Envelope).
 - Constant-time MAC verification (CBC) and AEAD tag verification (GCM). Tampered, wrong-key and
   malformed payloads are always rejected with typed errors.
 - Payload validation mirrors `Illuminate\Encryption\Encrypter`, including PHP's lenient
@@ -178,6 +180,37 @@ let payload = enc.encrypt(&Value::Bytes(attributes.to_php_serialized()?))?;
 `:object` and `:collection` encrypt its JSON. Use `decrypt_string` / `encrypt_string` and your JSON
 library.
 
+### Interop Envelope: expiry and scope
+
+`seal_envelope` and `open_envelope` add what the encrypter does not have: an expiry, a start time
+and a scope that a token may be used for. It is an **Interop Envelope**, a small JSON document
+(`typ`, `v`, `iat`, `nbf`, `exp`, `scope`, `data`) encrypted with `encrypt_string`, so the scope and
+the timestamps are authenticated like the rest. The Laravel package
+[`rene-roscher/laravel-interop`](https://github.com/Rene-Roscher/laravel-interop) and the Go and
+Node.js packages read and write the same format; its README describes it.
+
+```rust
+use laravel_rust_encryption::{Expiry, OpenOptions};
+use std::time::Duration;
+
+// Seal: what it is for, what it carries, when it stops working (chosen on every call).
+let token = enc.seal_envelope("password-reset", &serde_json::json!({"user": 7}),
+    Expiry::In(Duration::from_secs(3600)))?;
+
+// Open: say what you expect it to be for.
+let opened = enc.open_envelope(&token, "password-reset")?;
+let user = opened.data["user"].as_i64();            // or opened.into_data::<MyType>()
+
+match enc.open_envelope_with(&token, "invite", OpenOptions::default().leeway(5)) {
+    Err(e) => println!("{}", e.kind()),              // "scope_mismatch"
+    Ok(_) => {}
+}
+```
+
+`Expiry::In`, `Expiry::At` or `Expiry::Never`; `SealOptions::not_before` and `OpenOptions::leeway`
+cover the rest, and both options structs take `now` to override the clock in tests. A failure to
+decrypt is `EnvelopeError::Decrypt` (`kind()` is `decrypt_error`); the previous keys apply.
+
 ### Errors
 
 Decryption errors mirror Laravel's `DecryptException` and use its messages, so a tampered
@@ -242,6 +275,10 @@ php scripts/generate_app_vectors.php         # cookies, sessions, casts, random 
 cargo run --example genvectors | php scripts/verify_rust_vectors.php
 cargo run --example mutations | php scripts/verify_mutations.php
 ```
+
+`fixtures/envelope-vectors.json` holds Interop Envelope tokens of every shape, made by the real Laravel
+encrypter and `laravel-interop`, with the verdict every implementation has to reach;
+`tests/envelope_vectors.rs` checks them.
 
 `fixtures/vectors.json` holds payloads produced by the real `illuminate/encryption` (all four
 ciphers, strings, serialized values, previous keys); `fixtures/app-vectors.json` holds random-key
